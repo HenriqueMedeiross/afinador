@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Afinador de Violão</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Layout: dial 3D no topo, leitura numérica no meio, seis "tarraxas" embaixo. */
+  :root {
+    --bg: #130f0c;
+    --bg-glow: #2b1e15;
+    --panel: #1d1712;
+    --line: #3d3126;
+    --brass: #cdb77a;
+    --brass-dim: #6f6445;
+    --text: #f3ead8;
+    --muted: #a19680;
+    --ok: #7fd36b;
+    --warn: #f0a53a;
+    --bad: #e5603f;
+    --font-display: 'Barlow Condensed', 'Arial Narrow', Impact, sans-serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
+    --state: var(--muted);
+    color-scheme: dark;
+  }
+  body[data-state="far"]  { --state: var(--bad); }
+  body[data-state="near"] { --state: var(--warn); }
+  body[data-state="ok"]   { --state: var(--ok); }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-block: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-bottom, 0px));
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    background: radial-gradient(120% 80% at 50% 30%, var(--bg-glow), var(--bg) 70%) var(--bg);
+    color: var(--text);
+    font-family: var(--font-mono);
+  }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+  h1 { margin: 0; font: 700 20px/1 var(--font-display); letter-spacing: .16em; text-transform: uppercase; }
+  h1 span { color: var(--brass); }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  select, .btn, .stepper {
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    font: 500 13px var(--font-mono);
+  }
+  select, .btn { padding: 8px 10px; }
+  .btn { cursor: pointer; }
+  .stepper { display: flex; align-items: center; }
+  .stepper button { background: none; border: 0; color: var(--brass); font: 500 18px var(--font-mono); padding: 5px 11px; cursor: pointer; }
+  .stepper output { padding: 0 4px; min-width: 11ch; text-align: center; font-variant-numeric: tabular-nums; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+  .stage { position: relative; flex: 1; min-height: 220px; }
+  .stage canvas { display: block; width: 100%; height: 100%; }
+  .gate {
+    position: absolute; inset: 0;
+    display: grid; place-content: center; justify-items: center; gap: 14px;
+    padding: 24px; text-align: center;
+    background: color-mix(in srgb, var(--bg) 72%, transparent);
+  }
+  .gate p { margin: 0; max-width: 34ch; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .gate .error { color: var(--bad); }
+  .primary {
+    background: var(--brass); color: #1a140c; border: 0; border-radius: 999px;
+    padding: 14px 28px; cursor: pointer;
+    font: 700 18px var(--font-display); letter-spacing: .14em; text-transform: uppercase;
+  }
+  .primary:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
+
+  .readout { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; }
+  .metric { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .metric:last-child { align-items: flex-end; text-align: right; }
+  .label { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .num { font: 500 clamp(18px, 4.6vw, 28px) var(--font-mono); font-variant-numeric: tabular-nums; }
+  .sub { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .note { text-align: center; min-width: 5ch; }
+  .note-name { font: 700 clamp(72px, 16vw, 128px)/.85 var(--font-display); color: var(--state); transition: color .15s; }
+  .note-name sub { font-size: .28em; vertical-align: baseline; margin-left: .06em; color: var(--muted); }
+  .status { margin: 8px 0 0; min-height: 1.3em; font: 500 14px var(--font-mono); color: var(--state); }
+
+  .strings { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; width: 100%; max-width: 520px; margin-inline: auto; }
+  .string {
+    width: 100%; max-width: 76px; aspect-ratio: 1; justify-self: center;
+    display: grid; place-content: center; padding: 0;
+    border-radius: 50%; border: 1.5px solid var(--line);
+    background: var(--panel); color: var(--text);
+    font-family: var(--font-display); cursor: pointer;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .string .n { font: 500 11px var(--font-mono); color: var(--muted); }
+  .string .t { font-weight: 700; font-size: clamp(16px, 4.6vw, 22px); line-height: 1.05; }
+  .string[data-detected="true"] { border-color: var(--state); box-shadow: 0 0 0 3px color-mix(in srgb, var(--state) 30%, transparent); }
+  .string[aria-pressed="true"] { background: var(--brass); border-color: var(--brass); color: #1a140c; }
+  .string[aria-pressed="true"] .n { color: #4a3b20; }
+  .hint { margin: 0; text-align: center; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body data-state="idle">
+  <header>
+    <h1>Afinador <span>violão</span></h1>
+    <div class="controls">
+      <select id="tuning" aria-label="Afinação"></select>
+      <div class="stepper" role="group" aria-label="Frequência de referência do Lá 4">
+        <button id="refDown" type="button" aria-label="Diminuir referência">−</button>
+        <output id="refValue">A4 = 440 Hz</output>
+        <button id="refUp" type="button" aria-label="Aumentar referência">+</button>
+      </div>
+      <button id="micBtn" class="btn" type="button" hidden>Desligar microfone</button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <canvas id="dial" aria-label="Medidor de afinação"></canvas>
+    <div class="gate" id="gate">
+      <button id="startBtn" class="primary" type="button">Ativar microfone</button>
+      <p id="gateMsg">O áudio é analisado dentro do navegador e não é enviado a lugar nenhum.</p>
+    </div>
+  </main>
+
+  <section class="readout" aria-label="Leitura">
+    <div class="metric">
+      <span class="label">Frequência</span>
+      <span class="num" id="freq">— Hz</span>
+      <span class="sub" id="target">&nbsp;</span>
+    </div>
+    <div class="note">
+      <div class="note-name"><span id="noteName">—</span><sub id="noteOct"></sub></div>
+      <p class="status" id="status"></p>
+    </div>
+    <div class="metric">
+      <span class="label">Desvio</span>
+      <span class="num" id="cents">— ¢</span>
+      <span class="sub">100 ¢ = 1 semitom</span>
+    </div>
+  </section>
+
+  <nav class="strings" id="strings" aria-label="Cordas"></nav>
+  <p class="hint" id="hint"></p>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  /* TESTABLE:START */
+  /* ───────────── Configuração ───────────── */
+  const CONFIG = {
+    fftSize: 4096,            // tamanho do buffer lido do AnalyserNode
+    windowSize: 3072,         // amostras analisadas por leitura (~64 ms a 48 kHz)
+    minFreq: 60,              // abaixo do Mi grave com folga para Drop C
+    maxFreq: 500,             // acima do Mi agudo (329.6 Hz) com folga
+    minRms: 0.008,            // porta de ruído (~ -42 dBFS)
+    minClarity: 0.85,         // confiança mínima do pico NSDF
+    peakThreshold: 0.93,      // k do método McLeod
+    analysisIntervalMs: 33,
+    historyMs: 350,
+    holdMs: 450,              // quanto tempo a última nota fica na tela após o som parar
+    jumpCents: 80,            // salto que indica corda nova: zera o histórico
+    inTuneCents: 5,
+    inTuneHoldMs: 250,
+    nearCents: 25,
+    needleMaxCents: 50,
+    needleSmoothing: 14,
+    refA4: { min: 430, max: 450, initial: 440 },
+  };
+
+  const TUNINGS = [
+    { id: 'standard', name: 'Padrão  E A D G B E',            midi: [40, 45, 50, 55, 59, 64] },
+    { id: 'dropd',    name: 'Drop D  D A D G B E',            midi: [38, 45, 50, 55, 59, 64] },
+    { id: 'halfdown', name: 'Meio tom abaixo  E♭ A♭ D♭ G♭ B♭ E♭', midi: [39, 44, 49, 54, 58, 63] },
+    { id: 'dadgad',   name: 'DADGAD',                         midi: [38, 45, 50, 55, 57, 62] },
+  ];
+  const NOTE_NAMES = ['C', 'D♭', 'D', 'E♭', 'E', 'F', 'G♭', 'G', 'A♭', 'A', 'B♭', 'B'];
+
+  /* ───────────── Matemática de notas ───────────── */
+  const midiToFreq = (midi, refA4) => refA4 * 2 ** ((midi - 69) / 12);
+  const centsBetween = (freq, target) => 1200 * Math.log2(freq / target);
+  const noteLabel = (midi) => ({ name: NOTE_NAMES[midi % 12], octave: Math.floor(midi / 12) - 1 });
+
+  /* ───────────── Detecção de pitch (McLeod Pitch Method) ───────────── */
+  // NSDF(τ) = 2·Σ x[j]·x[j+τ] / Σ (x[j]² + x[j+τ]²), valores em [-1, 1].
+  function computeNsdf(x, size) {
+    const n = x.length;
+    const out = new Float32Array(size);
+    let m = 0;
+    for (let i = 0; i < n; i++) m += x[i] * x[i];
+    m *= 2;
+    for (let tau = 0; tau < size; tau++) {
+      if (tau > 0) m -= x[tau - 1] * x[tau - 1] + x[n - tau] * x[n - tau];
+      let r = 0;
+      for (let j = 0; j < n - tau; j++) r += x[j] * x[j + tau];
+      out[tau] = m > 0 ? (2 * r) / m : 0;
+    }
+    return out;
+  }
+
+  // Máximo de cada região positiva do NSDF, ignorando a região inicial em torno de τ = 0.
+  function findKeyMaxima(nsdf, minTau) {
+    const peaks = [];
+    const last = nsdf.length - 1;
+    let pos = 0;
+    while (pos < last && nsdf[pos] > 0) pos++;
+    while (pos < last && nsdf[pos] <= 0) pos++;
+    let current = -1;
+    for (; pos < last; pos++) {
+      if (nsdf[pos] > 0) {
+        if (current < 0 || nsdf[pos] > nsdf[current]) current = pos;
+      } else if (current >= 0) {
+        peaks.push(current);
+        current = -1;
+      }
+    }
+    if (current >= 0) peaks.push(current);
+    return peaks.filter((tau) => tau >= minTau);
+  }
+
+  // Interpolação parabólica para precisão sub-amostra.
+  function refinePeak(nsdf, t) {
+    const a = nsdf[t - 1], b = nsdf[t], c = nsdf[t + 1];
+    const denom = a - 2 * b + c;
+    if (denom === 0) return { tau: t, clarity: b };
+    const shift = (0.5 * (a - c)) / denom;
+    return { tau: t + shift, clarity: b - 0.25 * (a - c) * shift };
+  }
+
+  function detectPitch(samples, sampleRate, cfg) {
+    const n = samples.length;
+    let energy = 0;
+    for (let i = 0; i < n; i++) energy += samples[i] * samples[i];
+    const rms = Math.sqrt(energy / n);
+    if (rms < cfg.minRms) return null;
+
+    const minTau = Math.max(2, Math.floor(sampleRate / cfg.maxFreq));
+    const maxTau = Math.min(Math.ceil(sampleRate / cfg.minFreq), (n >> 1) - 2);
+    const nsdf = computeNsdf(samples, maxTau + 2);
+
+    const peaks = findKeyMaxima(nsdf, minTau);
+    if (!peaks.length) return null;
+    let best = 0;
+    for (const t of peaks) best = Math.max(best, nsdf[t]);
+    const chosen = peaks.find((t) => nsdf[t] >= cfg.peakThreshold * best);
+
+    const { tau, clarity } = refinePeak(nsdf, chosen);
+    if (clarity < cfg.minClarity) return null;
+    return { frequency: sampleRate / tau, clarity, rms };
+  }
+
+  // Mediana das últimas leituras: estabiliza o ponteiro sem atrasar muito a resposta.
+  function createPitchTracker(cfg) {
+    let history = [];
+    let held = null;
+    let lastSeen = -Infinity;
+    const median = (values) => {
+      const sorted = [...values].sort((p, q) => p - q);
+      return sorted[sorted.length >> 1];
+    };
+    return {
+      push(freq, now) {
+        if (held && Math.abs(centsBetween(freq, held)) > cfg.jumpCents) history = [];
+        history.push({ t: now, freq });
+        history = history.filter((h) => now - h.t <= cfg.historyMs);
+        held = median(history.map((h) => h.freq));
+        lastSeen = now;
+      },
+      current(now) {
+        return held !== null && now - lastSeen <= cfg.holdMs ? held : null;
+      },
+      reset() { history = []; held = null; lastSeen = -Infinity; },
+    };
+  }
+
+  // Escolhe a corda-alvo: a mais próxima em cents (modo automático) ou a corda fixada.
+  function matchString(freq, targets, lockedIndex) {
+    const candidates = lockedIndex === null ? targets.map((_, i) => i) : [lockedIndex];
+    let index = candidates[0];
+    let cents = centsBetween(freq, targets[index].freq);
+    for (const i of candidates) {
+      const c = centsBetween(freq, targets[i].freq);
+      if (Math.abs(c) < Math.abs(cents)) { index = i; cents = c; }
+    }
+    return { index, cents };
+  }
+  /* TESTABLE:END */
+
+  /* ───────────── Entrada de áudio ───────────── */
+  function createAudioInput() {
+    let ctx = null, stream = null, analyser = null, buffer = null;
+    return {
+      get running() { return ctx !== null; },
+      get sampleRate() { return ctx.sampleRate; },
+      async start() {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('unsupported');
+        // Processamentos de voz distorcem o pitch de um instrumento: desligados.
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        });
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        await ctx.resume();
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = CONFIG.fftSize;
+        analyser.smoothingTimeConstant = 0;
+        ctx.createMediaStreamSource(stream).connect(analyser); // sem saída: evita microfonia
+        buffer = new Float32Array(analyser.fftSize);
+      },
+      read() {
+        analyser.getFloatTimeDomainData(buffer);
+        return buffer;
+      },
+      stop() {
+        stream?.getTracks().forEach((track) => track.stop());
+        ctx?.close();
+        ctx = stream = analyser = buffer = null;
+      },
+    };
+  }
+
+  function describeMicError(err) {
+    switch (err?.name) {
+      case 'NotAllowedError':
+      case 'SecurityError':
+        return 'Permissão negada. Libere o microfone no cadeado da barra de endereço e tente de novo.';
+      case 'NotFoundError':
+      case 'OverconstrainedError':
+        return 'Nenhum microfone encontrado. Conecte um e tente de novo.';
+      case 'NotReadableError':
+        return 'O microfone está em uso por outro aplicativo.';
+      default:
+        return err?.message === 'unsupported'
+          ? 'Este navegador não libera o microfone nesta página. Abra o arquivo no Chrome ou no Edge.'
+          : 'Não foi possível acessar o microfone.';
+    }
+  }
+
+  /* ───────────── Dial 3D (Three.js) ───────────── */
+  function createDial(canvas, stage) {
+    const RADIUS = 6;
+    const MAX_ANGLE = THREE.MathUtils.degToRad(62);
+    const WAVE_POINTS = 256, WAVE_STEP = 4, WAVE_Y = -1.9, WAVE_WIDTH = 9;
+    const VIEW = { width: 14.6, height: 10.8, centerY: 2.3 };
+    const centsToAngle = (c) => THREE.MathUtils.clamp(c / CONFIG.needleMaxCents, -1, 1) * MAX_ANGLE;
+
+    const brass = new THREE.Color(cssVar('--brass'));
+    const brassDim = new THREE.Color(cssVar('--brass-dim'));
+    const okColor = new THREE.Color(cssVar('--ok'));
+
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    const key = new THREE.DirectionalLight(0xffffff, 0.9);
+    key.position.set(-3, 6, 9);
+    scene.add(key);
+
+    const dial = new THREE.Group();
+    dial.rotation.x = -0.2;
+    scene.add(dial);
+
+    // Arco, zona "afinada" (±5 ¢) e marcas a cada 5 ¢.
+    dial.add(new THREE.Mesh(
+      new THREE.RingGeometry(RADIUS - 0.04, RADIUS + 0.04, 128, 1, Math.PI / 2 - MAX_ANGLE, MAX_ANGLE * 2),
+      new THREE.MeshBasicMaterial({ color: brassDim, side: THREE.DoubleSide })));
+
+    const zoneAngle = centsToAngle(CONFIG.inTuneCents);
+    const zoneMat = new THREE.MeshBasicMaterial({ color: okColor, transparent: true, opacity: 0.14, side: THREE.DoubleSide });
+    const zone = new THREE.Mesh(new THREE.RingGeometry(RADIUS - 1.5, RADIUS - 0.2, 32, 1, Math.PI / 2 - zoneAngle, zoneAngle * 2), zoneMat);
+    zone.position.z = -0.05;
+    dial.add(zone);
+
+    const tickGeometries = new Map();
+    const tickGeometry = (len) => {
+      if (!tickGeometries.has(len)) tickGeometries.set(len, new THREE.BoxGeometry(0.07, len, 0.14));
+      return tickGeometries.get(len);
+    };
+    for (let c = -CONFIG.needleMaxCents; c <= CONFIG.needleMaxCents; c += 5) {
+      const len = c === 0 ? 1.3 : c % 25 === 0 ? 0.9 : 0.5;
+      const tick = new THREE.Mesh(tickGeometry(len), new THREE.MeshLambertMaterial({ color: c % 25 === 0 ? brass : brassDim }));
+      tick.position.y = RADIUS - len / 2;
+      const pivot = new THREE.Object3D();
+      pivot.rotation.z = -centsToAngle(c);
+      pivot.add(tick);
+      dial.add(pivot);
+    }
+
+    // Ponteiro cônico com brilho na ponta.
+    const needleLength = RADIUS - 0.3;
+    const needleMat = new THREE.MeshLambertMaterial({ color: brass });
+    const needlePivot = new THREE.Object3D();
+    const needle = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.1, needleLength, 16), needleMat);
+    needle.position.y = needleLength / 2;
+    needlePivot.add(needle);
+    const glow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: makeGlowTexture(), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0.2,
+    }));
+    glow.scale.set(1.6, 1.6, 1);
+    glow.position.y = needleLength;
+    needlePivot.add(glow);
+    dial.add(needlePivot);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.26, 32), new THREE.MeshLambertMaterial({ color: brass }));
+    hub.rotation.x = Math.PI / 2;
+    dial.add(hub);
+
+    // Osciloscópio da corda, disparado em cruzamento de zero para ficar estável.
+    const wavePositions = new Float32Array(WAVE_POINTS * 3);
+    const waveGeometry = new THREE.BufferGeometry();
+    waveGeometry.setAttribute('position', new THREE.BufferAttribute(wavePositions, 3));
+    const waveMat = new THREE.LineBasicMaterial({ color: brass });
+    dial.add(new THREE.Line(waveGeometry, waveMat));
+    for (let i = 0; i < WAVE_POINTS; i++) {
+      wavePositions[i * 3] = (i / (WAVE_POINTS - 1) - 0.5) * WAVE_WIDTH;
+      wavePositions[i * 3 + 1] = WAVE_Y;
+    }
+
+    function updateWave(samples) {
+      let start = 0, gain = 0;
+      if (samples) {
+        const span = WAVE_POINTS * WAVE_STEP;
+        const limit = Math.min(1024, samples.length - span);
+        for (let i = 1; i < limit; i++) {
+          if (samples[i - 1] < 0 && samples[i] >= 0) { start = i; break; }
+        }
+        let peak = 0;
+        for (let i = 0; i < span; i++) peak = Math.max(peak, Math.abs(samples[start + i]));
+        gain = 0.9 / Math.max(peak, 0.06);
+      }
+      for (let i = 0; i < WAVE_POINTS; i++) {
+        wavePositions[i * 3 + 1] = WAVE_Y + (samples ? samples[start + i * WAVE_STEP] * gain : 0);
+      }
+      waveGeometry.attributes.position.needsUpdate = true;
+    }
+
+    // Rótulos só depois das fontes, para o canvas desenhar com a tipografia certa.
+    const labelReady = Promise.race([document.fonts?.ready, new Promise((r) => setTimeout(r, 1500))]);
+    labelReady.then(() => {
+      const addLabel = (text, angle, radius, size, scale) => {
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: makeLabelTexture(text, size), transparent: true, depthTest: false }));
+        sprite.scale.set(2 * scale, scale, 1);
+        sprite.position.set(Math.sin(angle) * radius, Math.cos(angle) * radius, 0);
+        dial.add(sprite);
+      };
+      [-50, -25, 0, 25, 50].forEach((c) => addLabel(c > 0 ? `+${c}` : c < 0 ? `−${-c}` : '0', centsToAngle(c), RADIUS + 0.95, 40, 1));
+      addLabel('♭', -MAX_ANGLE, RADIUS - 1.5, 80, 1.3);
+      addLabel('♯', MAX_ANGLE, RADIUS - 1.5, 80, 1.3);
+    });
+
+    function makeLabelTexture(text, size) {
+      const c = document.createElement('canvas');
+      c.width = 256; c.height = 128;
+      const g = c.getContext('2d');
+      g.font = `500 ${size}px ${cssVar('--font-mono')}`;
+      g.fillStyle = cssVar('--brass');
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(text, 128, 64);
+      return new THREE.CanvasTexture(c);
+    }
+    function makeGlowTexture() {
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      const g = c.getContext('2d');
+      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0, 'rgba(255,255,255,1)');
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 64);
+      return new THREE.CanvasTexture(c);
+    }
+
+    function resize() {
+      const w = stage.clientWidth, h = stage.clientHeight;
+      if (!w || !h) return;
+      renderer.setSize(w, h, false);
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+      const distance = Math.max((VIEW.height / 2) / tanHalf, (VIEW.width / 2) / (tanHalf * camera.aspect));
+      camera.position.set(0, VIEW.centerY, distance);
+      camera.lookAt(0, VIEW.centerY, 0);
+    }
+    new ResizeObserver(resize).observe(stage);
+    resize();
+
+    const tint = new THREE.Color(cssVar('--muted'));
+    const targetTint = new THREE.Color();
+    let shownCents = 0;
+
+    return {
+      update({ cents, active, inTune, colorHex, samples }, dt) {
+        const follow = 1 - Math.exp(-dt * CONFIG.needleSmoothing);
+        shownCents += ((active ? cents : 0) - shownCents) * follow;
+        needlePivot.rotation.z = -centsToAngle(shownCents);
+
+        tint.lerp(targetTint.set(colorHex), 1 - Math.exp(-dt * 10));
+        needleMat.color.copy(tint);
+        needleMat.emissive.copy(tint).multiplyScalar(0.45);
+        glow.material.color.copy(tint);
+        glow.material.opacity += ((active ? 0.85 : 0.15) - glow.material.opacity) * follow;
+        zoneMat.opacity += ((inTune ? 0.55 : 0.14) - zoneMat.opacity) * follow;
+        waveMat.color.copy(tint);
+
+        updateWave(samples);
+        renderer.render(scene, camera);
+      },
+    };
+  }
+
+  /* ───────────── Aplicação ───────────── */
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    stage: $('stage'), canvas: $('dial'), gate: $('gate'), gateMsg: $('gateMsg'),
+    startBtn: $('startBtn'), micBtn: $('micBtn'),
+    tuning: $('tuning'), refDown: $('refDown'), refUp: $('refUp'), refValue: $('refValue'),
+    freq: $('freq'), target: $('target'), cents: $('cents'),
+    noteName: $('noteName'), noteOct: $('noteOct'), status: $('status'),
+    strings: $('strings'), hint: $('hint'),
+  };
+
+  if (!window.THREE) {
+    els.startBtn.hidden = true;
+    els.gateMsg.className = 'error';
+    els.gateMsg.textContent = 'Não foi possível carregar o Three.js. Conecte-se à internet e recarregue a página.';
+    return;
+  }
+
+  const palette = {
+    idle: cssVar('--muted'), far: cssVar('--bad'), near: cssVar('--warn'), ok: cssVar('--ok'),
+  };
+
+  const state = { tuningId: 'standard', refA4: CONFIG.refA4.initial, lockedIndex: null, targets: [], inTuneSince: null };
+  const audio = createAudioInput();
+  const tracker = createPitchTracker(CONFIG);
+  const dial = createDial(els.canvas, els.stage);
+
+  const savedKey = 'afinador-violao';
+  try {
+    const saved = JSON.parse(localStorage.getItem(savedKey) || '{}');
+    if (TUNINGS.some((t) => t.id === saved.tuningId)) state.tuningId = saved.tuningId;
+    if (saved.refA4 >= CONFIG.refA4.min && saved.refA4 <= CONFIG.refA4.max) state.refA4 = saved.refA4;
+  } catch { /* armazenamento indisponível: segue com os padrões */ }
+  const persist = () => {
+    try { localStorage.setItem(savedKey, JSON.stringify({ tuningId: state.tuningId, refA4: state.refA4 })); } catch { /* ignora */ }
+  };
+
+  const setText = (el, value) => { if (el.textContent !== value) el.textContent = value; };
+  const formatCents = (c) => {
+    const rounded = Math.round(c);
+    return `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)} ¢`;
+  };
+
+  function rebuildTargets() {
+    const tuning = TUNINGS.find((t) => t.id === state.tuningId);
+    state.targets = tuning.midi.map((midi) => ({ midi, freq: midiToFreq(midi, state.refA4), ...noteLabel(midi) }));
+  }
+
+  function renderStrings() {
+    els.strings.replaceChildren(...state.targets.map((t, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'string';
+      btn.dataset.index = i;
+      btn.setAttribute('aria-pressed', String(state.lockedIndex === i));
+      btn.setAttribute('aria-label', `Corda ${6 - i}, ${t.name}${t.octave}`);
+      btn.innerHTML = `<span class="n">${6 - i}</span><span class="t">${t.name}${t.octave}</span>`;
+      return btn;
+    }));
+    renderHint();
+  }
+
+  function renderHint() {
+    els.hint.textContent = state.lockedIndex === null
+      ? 'Automático: detecta a corda mais próxima. Toque numa corda para fixá-la.'
+      : `Corda ${6 - state.lockedIndex} fixada. Toque nela de novo para voltar ao automático.`;
+  }
+
+  function renderRef() {
+    els.refValue.textContent = `A4 = ${state.refA4} Hz`;
+    els.refDown.disabled = state.refA4 <= CONFIG.refA4.min;
+    els.refUp.disabled = state.refA4 >= CONFIG.refA4.max;
+  }
+
+  function resetReading() {
+    tracker.reset();
+    state.inTuneSince = null;
+  }
+
+  els.tuning.replaceChildren(...TUNINGS.map((t) => new Option(t.name, t.id)));
+  els.tuning.value = state.tuningId;
+  els.tuning.addEventListener('change', () => {
+    state.tuningId = els.tuning.value;
+    state.lockedIndex = null;
+    rebuildTargets(); renderStrings(); resetReading(); persist();
+  });
+  const stepRef = (delta) => {
+    state.refA4 = Math.min(CONFIG.refA4.max, Math.max(CONFIG.refA4.min, state.refA4 + delta));
+    rebuildTargets(); renderStrings(); renderRef(); resetReading(); persist();
+  };
+  els.refDown.addEventListener('click', () => stepRef(-1));
+  els.refUp.addEventListener('click', () => stepRef(1));
+  els.strings.addEventListener('click', (event) => {
+    const btn = event.target.closest('.string');
+    if (!btn) return;
+    const i = Number(btn.dataset.index);
+    state.lockedIndex = state.lockedIndex === i ? null : i;
+    resetReading();
+    renderStrings();
+  });
+
+  async function toggleMic() {
+    if (audio.running) {
+      audio.stop();
+      resetReading();
+      syncMicUi();
+      return;
+    }
+    els.gateMsg.className = '';
+    try {
+      await audio.start();
+      syncMicUi();
+    } catch (err) {
+      els.gateMsg.className = 'error';
+      els.gateMsg.textContent = describeMicError(err);
+    }
+  }
+  function syncMicUi() {
+    els.gate.hidden = audio.running;
+    els.micBtn.hidden = !audio.running;
+    if (!audio.running) {
+      els.gateMsg.className = '';
+      els.gateMsg.textContent = 'Microfone desligado. O áudio é analisado dentro do navegador e não é enviado a lugar nenhum.';
+    }
+  }
+  els.startBtn.addEventListener('click', toggleMic);
+  els.micBtn.addEventListener('click', toggleMic);
+
+  // Atualiza o texto e retorna o que o dial precisa para desenhar o quadro.
+  function present(freq, now) {
+    let view;
+    if (freq === null) {
+      state.inTuneSince = null;
+      view = { level: 'idle', index: -1, cents: 0, active: false, inTune: false };
+      setText(els.noteName, '—'); setText(els.noteOct, '');
+      setText(els.freq, '— Hz'); setText(els.target, ' '); setText(els.cents, '— ¢');
+      setText(els.status, audio.running ? 'Toque uma corda' : '');
+    } else {
+      const { index, cents } = matchString(freq, state.targets, state.lockedIndex);
+      const target = state.targets[index];
+      const absCents = Math.abs(cents);
+      if (absCents <= CONFIG.inTuneCents) state.inTuneSince ??= now; else state.inTuneSince = null;
+      const inTune = state.inTuneSince !== null && now - state.inTuneSince >= CONFIG.inTuneHoldMs;
+      const level = inTune ? 'ok' : absCents <= CONFIG.nearCents ? 'near' : 'far';
+      view = { level, index, cents, active: true, inTune };
+
+      setText(els.noteName, target.name); setText(els.noteOct, String(target.octave));
+      setText(els.freq, `${freq.toFixed(1)} Hz`);
+      setText(els.target, `alvo ${target.freq.toFixed(2)} Hz`);
+      setText(els.cents, formatCents(cents));
+      setText(els.status, inTune ? 'Afinada' : cents < 0 ? 'Baixa · aperte a corda' : 'Alta · afrouxe a corda');
+    }
+    document.body.dataset.state = view.level;
+    els.strings.querySelectorAll('.string').forEach((btn) => {
+      btn.dataset.detected = String(Number(btn.dataset.index) === view.index);
+    });
+    return view;
+  }
+
+  function analyse(samples, now) {
+    const window_ = samples.subarray(samples.length - CONFIG.windowSize);
+    const result = detectPitch(window_, audio.sampleRate, CONFIG);
+    if (result) tracker.push(result.frequency, now);
+  }
+
+  let lastFrame = performance.now(), lastAnalysis = 0;
+  function frame(now) {
+    requestAnimationFrame(frame);
+    const dt = Math.min((now - lastFrame) / 1000, 0.1);
+    lastFrame = now;
+
+    let samples = null;
+    if (audio.running) {
+      samples = audio.read();
+      if (now - lastAnalysis >= CONFIG.analysisIntervalMs) {
+        lastAnalysis = now;
+        analyse(samples, now);
+      }
+    }
+    const view = present(audio.running ? tracker.current(now) : null, now);
+    dial.update({ cents: view.cents, active: view.active, inTune: view.inTune, colorHex: palette[view.level], samples }, dt);
+  }
+
+  rebuildTargets();
+  renderStrings();
+  renderRef();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
